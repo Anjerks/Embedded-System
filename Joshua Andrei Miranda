@@ -1,0 +1,92 @@
+#include <DHT.h>
+#include <ESP32Servo.h>
+
+// === Pin Definitions ===
+#define DHTPIN 4
+#define DHTTYPE DHT11
+#define SERVOPIN 13
+#define BUZZERPIN 12
+
+#define LED_GREEN 14
+#define LED_YELLOW 27
+#define LED_RED 26
+
+DHT dht(DHTPIN, DHTTYPE);
+Servo myServo;
+
+float targetTemp = 25.0; // Target temperature (normal)
+float Kp = 10.0;         // Proportional gain
+float Ki = 0.05;         // Integral gain (for smoother control)
+float Kd = 5.0;          // Derivative gain (to reduce oscillations)
+
+// Variables for PID control
+float previousError = 0;
+float integral = 0;
+float derivative = 0;
+
+void setup() {
+  Serial.begin(115200);
+  dht.begin();
+
+  // Setup Servo
+  myServo.attach(SERVOPIN);
+  myServo.write(0);  // Initial position
+
+  pinMode(LED_GREEN, OUTPUT);
+  pinMode(LED_YELLOW, OUTPUT);
+  pinMode(LED_RED, OUTPUT);
+  pinMode(BUZZERPIN, OUTPUT);
+
+  // Turn off all LEDs initially
+  digitalWrite(LED_GREEN, LOW);
+  digitalWrite(LED_YELLOW, LOW);
+  digitalWrite(LED_RED, LOW);
+  digitalWrite(BUZZERPIN, LOW);
+}
+
+void loop() {
+  float temperature = dht.readTemperature();
+
+  if (isnan(temperature)) {
+    Serial.println("Failed to read from DHT sensor!");
+    return;
+  }
+
+  Serial.print("Temperature: ");
+  Serial.print(temperature);
+  Serial.println(" °C");
+
+  // PID Control Logic for Servo
+  float error = temperature - targetTemp;
+  integral += error;
+  derivative = error - previousError;
+  float angle = Kp * error + Ki * integral + Kd * derivative;
+
+  // Constrain the angle between 0 and 180 degrees
+  angle = constrain(angle, 0, 180);
+  myServo.write(angle);
+
+  Serial.print("Servo Angle: ");
+  Serial.println(angle);
+
+  // Reset all LEDs and buzzer
+  digitalWrite(LED_GREEN, LOW);
+  digitalWrite(LED_YELLOW, LOW);
+  digitalWrite(LED_RED, LOW);
+  digitalWrite(BUZZERPIN, LOW);
+
+  // LED and Buzzer Logic Based on Temp
+  if (temperature < 27) {
+    digitalWrite(LED_GREEN, HIGH);   // Normal
+    Serial.println("LED Status: GREEN");
+  } else if (temperature >= 27 && temperature < 30) {
+    digitalWrite(LED_YELLOW, HIGH);  // Moderate
+    Serial.println("LED Status: YELLOW");
+  } else {
+    digitalWrite(LED_RED, HIGH);     // High
+    digitalWrite(BUZZERPIN, HIGH);   // Turn on buzzer when temperature is high
+    Serial.println("LED Status: RED");
+  }
+
+  delay(2000); // Delay before the next reading
+}
