@@ -1,0 +1,131 @@
+// File: src/App.jsx
+import React, { useState, useEffect } from 'react';
+import { Line } from 'react-chartjs-2';
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+
+const App = () => {
+  const [sensorData, setSensorData] = useState([]);
+  const [frequencyData, setFrequencyData] = useState([]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const value = Math.sin(Date.now() / 1000) + 0.5 * Math.random();
+      setSensorData(prev => [...prev.slice(-49), value]);
+    }, 200);
+    return () => clearInterval(interval);
+  }, []);
+
+  const applyFFT = () => {
+    fetch("/api/fft", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ data: sensorData })
+    })
+      .then(res => res.json())
+      .then(setFrequencyData);
+  };
+
+  const timeChartData = {
+    labels: sensorData.map((_, i) => i),
+    datasets: [{
+      label: 'Sensor Reading',
+      data: sensorData,
+      fill: false,
+      borderColor: 'blue',
+    }]
+  };
+
+  const freqChartData = {
+    labels: frequencyData.map((_, i) => i),
+    datasets: [{
+      label: 'Frequency Spectrum',
+      data: frequencyData,
+      fill: false,
+      borderColor: 'green',
+    }]
+  };
+
+  return (
+    <main className="p-6 grid gap-6">
+      <Card>
+        <CardContent>
+          <h2 className="text-xl font-bold mb-2">Sensor Data (Time Domain)</h2>
+          <Line data={timeChartData} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent>
+          <h2 className="text-xl font-bold mb-2">FFT Analysis (Frequency Domain)</h2>
+          <Button onClick={applyFFT} className="mb-4">Run FFT</Button>
+          <Line data={freqChartData} />
+        </CardContent>
+      </Card>
+    </main>
+  );
+};
+
+export default App;
+
+// -------------------
+// File: server/fft.js (Backend route using Node.js)
+
+const express = require('express');
+const router = express.Router();
+const fft = require('fft-js').fft;
+const fftUtil = require('fft-js').util;
+
+router.post('/fft', (req, res) => {
+  const { data } = req.body;
+  const phasors = fft(data);
+  const mags = fftUtil.fftMag(phasors);
+  res.json(mags.slice(0, mags.length / 2));
+});
+
+module.exports = router;
+
+// -------------------
+// File: notebooks/fourier_analysis.ipynb (Python example)
+
+/* Markdown cell:
+## Fourier Analysis Demonstration
+This notebook demonstrates FFT and filtering of step sensor data.
+*/
+
+# Code cell:
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.fft import fft, fftfreq
+
+# Simulated step data
+Fs = 50  # Sampling rate
+T = 1 / Fs
+x = np.linspace(0.0, 1.0, Fs)
+y = np.sin(2.0 * np.pi * 5.0 * x) + 0.5 * np.random.normal(size=Fs)
+
+# FFT
+yf = fft(y)
+x_freq = fftfreq(Fs, T)[:Fs // 2]
+
+plt.plot(x_freq, 2.0/Fs * np.abs(yf[:Fs//2]))
+plt.title("FFT of Step Data")
+plt.xlabel("Frequency (Hz)")
+plt.ylabel("Amplitude")
+plt.grid()
+plt.show()
+
+// -------------------
+// File: notebooks/laplace_transform.ipynb (Python Laplace example)
+
+# Code cell:
+from sympy import symbols, Function, LaplaceTransform, Heaviside, exp, simplify
+
+f, s, t = symbols('f s t')
+F = LaplaceTransform(Heaviside(t), t, s, noconds=True)
+simplify(F)
+
+/* Markdown cell:
+## Laplace Analysis
+The above transform models a unit step input. Extend this to actuator control and stability analysis in full implementation.
+*/
