@@ -1,65 +1,82 @@
+// ================================
 // File: src/App.jsx
+// ================================
 import React, { useState, useEffect } from 'react';
 import { Line } from 'react-chartjs-2';
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
 
 const App = () => {
-  const [sensorData, setSensorData] = useState([]);
+  const [voltageData, setVoltageData] = useState([]);
+  const [filteredData, setFilteredData] = useState([]);
   const [frequencyData, setFrequencyData] = useState([]);
+  const [stepCount, setStepCount] = useState(0);
 
   useEffect(() => {
     const interval = setInterval(() => {
-      const value = Math.sin(Date.now() / 1000) + 0.5 * Math.random();
-      setSensorData(prev => [...prev.slice(-49), value]);
+      const v = Math.abs(Math.sin(Date.now() / 1000) + 0.4 * Math.random());
+      setVoltageData(prev => {
+        const newData = [...prev, v];
+        return newData.length > 50 ? newData.slice(-50) : newData;
+      });
+      if (v > 0.9) setStepCount(c => c + 1);
     }, 200);
     return () => clearInterval(interval);
   }, []);
 
-  const applyFFT = () => {
-    fetch("/api/fft", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ data: sensorData })
-    })
-      .then(res => res.json())
-      .then(setFrequencyData);
+  const applyFFT = async () => {
+    try {
+      const res = await fetch('/api/fft', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data: voltageData })
+      });
+      const data = await res.json();
+      setFrequencyData(data);
+    } catch (error) {
+      console.error(error);
+    }
   };
 
-  const timeChartData = {
-    labels: sensorData.map((_, i) => i),
-    datasets: [{
-      label: 'Sensor Reading',
-      data: sensorData,
-      fill: false,
-      borderColor: 'blue',
-    }]
+  const filterSignal = async () => {
+    try {
+      const res = await fetch('/api/filter', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data: voltageData })
+      });
+      const data = await res.json();
+      setFilteredData(data);
+    } catch (error) {
+      console.error(error);
+    }
   };
 
-  const freqChartData = {
+  const voltageChart = {
+    labels: voltageData.map((_, i) => i),
+    datasets: [{ label: 'Voltage', data: voltageData, borderColor: 'blue' }]
+  };
+
+  const filteredChart = {
+    labels: filteredData.map((_, i) => i),
+    datasets: [{ label: 'Filtered Voltage', data: filteredData, borderColor: 'orange' }]
+  };
+
+  const frequencyChart = {
     labels: frequencyData.map((_, i) => i),
-    datasets: [{
-      label: 'Frequency Spectrum',
-      data: frequencyData,
-      fill: false,
-      borderColor: 'green',
-    }]
+    datasets: [{ label: 'Frequency Spectrum', data: frequencyData, borderColor: 'green' }]
   };
 
   return (
     <main className="p-6 grid gap-6">
       <Card>
         <CardContent>
-          <h2 className="text-xl font-bold mb-2">Sensor Data (Time Domain)</h2>
-          <Line data={timeChartData} />
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardContent>
-          <h2 className="text-xl font-bold mb-2">FFT Analysis (Frequency Domain)</h2>
-          <Button onClick={applyFFT} className="mb-4">Run FFT</Button>
-          <Line data={freqChartData} />
+          <h2 className="text-xl font-bold">Step Count: {stepCount}</h2>
+          <Line data={voltageChart} />
+          <Button onClick={applyFFT} className="mt-2">Run FFT</Button>
+          <Line data={frequencyChart} />
+          <Button onClick={filterSignal} className="mt-2">Filter Signal</Button>
+          <Line data={filteredChart} />
         </CardContent>
       </Card>
     </main>
@@ -68,64 +85,96 @@ const App = () => {
 
 export default App;
 
-// -------------------
-// File: server/fft.js (Backend route using Node.js)
-
+// ================================
+// File: server/fft.js
+// ================================
 const express = require('express');
-const router = express.Router();
 const fft = require('fft-js').fft;
 const fftUtil = require('fft-js').util;
 
+const router = express.Router();
+
 router.post('/fft', (req, res) => {
-  const { data } = req.body;
-  const phasors = fft(data);
-  const mags = fftUtil.fftMag(phasors);
-  res.json(mags.slice(0, mags.length / 2));
+  try {
+    const { data } = req.body;
+    if (!Array.isArray(data)) return res.status(400).json({ error: 'Invalid data format' });
+    const phasors = fft(data);
+    const mags = fftUtil.fftMag(phasors);
+    res.json(mags.slice(0, Math.floor(mags.length / 2)));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 module.exports = router;
 
-// -------------------
-// File: notebooks/fourier_analysis.ipynb (Python example)
+// ================================
+// File: server/filter.js
+// ================================
+const express = require('express');
+const butterworth = require('butterworth-filter');
 
-/* Markdown cell:
-## Fourier Analysis Demonstration
-This notebook demonstrates FFT and filtering of step sensor data.
+const router = express.Router();
+
+router.post('/filter', (req, res) => {
+  try {
+    const { data } = req.body;
+    if (!Array.isArray(data)) return res.status(400).json({ error: 'Invalid data format' });
+    const filtered = butterworth.lowpass(data, 2, 0.1);
+    res.json(filtered);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+module.exports = router;
+
+// ================================
+// File: notebooks/fourier_analysis.ipynb
+// ================================
+/* Markdown Cell:
+## Fourier Analysis and Signal Filtering
 */
 
-# Code cell:
+# Code Cell
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.fft import fft, fftfreq
+from scipy.signal import butter, filtfilt
 
-# Simulated step data
-Fs = 50  # Sampling rate
+Fs = 50
 T = 1 / Fs
-x = np.linspace(0.0, 1.0, Fs)
-y = np.sin(2.0 * np.pi * 5.0 * x) + 0.5 * np.random.normal(size=Fs)
+x = np.linspace(0.0, 1.0, Fs, endpoint=False)
+y = np.sin(2.0*np.pi*5.0*x) + 0.5 * np.random.randn(Fs)
 
-# FFT
+b, a = butter(2, 0.1)
+y_filtered = filtfilt(b, a, y)
+
 yf = fft(y)
-x_freq = fftfreq(Fs, T)[:Fs // 2]
+x_freq = fftfreq(Fs, T)[:Fs//2]
 
+plt.figure()
+plt.subplot(2,1,1)
+plt.plot(x, y, label="Raw")
+plt.plot(x, y_filtered, label="Filtered")
+plt.legend()
+
+plt.subplot(2,1,2)
 plt.plot(x_freq, 2.0/Fs * np.abs(yf[:Fs//2]))
-plt.title("FFT of Step Data")
-plt.xlabel("Frequency (Hz)")
-plt.ylabel("Amplitude")
-plt.grid()
+plt.title("FFT Spectrum")
 plt.show()
 
-// -------------------
-// File: notebooks/laplace_transform.ipynb (Python Laplace example)
+// ================================
+// File: notebooks/laplace_transform.ipynb
+// ================================
+# Code Cell
+from sympy import symbols, Heaviside, LaplaceTransform
 
-# Code cell:
-from sympy import symbols, Function, LaplaceTransform, Heaviside, exp, simplify
+t, s = symbols('t s')
+H = Heaviside(t)
+lt = LaplaceTransform(H, t, s, noconds=True)
+lt
 
-f, s, t = symbols('f s t')
-F = LaplaceTransform(Heaviside(t), t, s, noconds=True)
-simplify(F)
-
-/* Markdown cell:
-## Laplace Analysis
-The above transform models a unit step input. Extend this to actuator control and stability analysis in full implementation.
-*/
+# Markdown Cell:
+## Laplace Transform of Unit Step Function
+Used for modeling control system response in actuator simulations.
