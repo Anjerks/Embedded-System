@@ -1,10 +1,58 @@
-// ================================
-// File: src/App.jsx
-// ================================
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Kinetic Matt Step Counter</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="root"></div>
+  <script src="bundle.js"></script>
+</body>
+</html>
+
+body {
+  font-family: Arial, sans-serif;
+  padding: 20px;
+  max-width: 700px;
+  margin: auto;
+  background: #f0f2f5;
+}
+h2 {
+  margin-bottom: 10px;
+}
+canvas {
+  width: 100% !important;
+  height: 200px !important;
+}
+button {
+  margin: 10px 0;
+  padding: 10px 15px;
+  font-size: 16px;
+  cursor: pointer;
+}
+.card {
+  background: white;
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+  margin-bottom: 20px;
+}
+
 import React, { useState, useEffect } from 'react';
 import { Line } from 'react-chartjs-2';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import {
+  Chart as ChartJS,
+  LineElement,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  Tooltip,
+  Legend,
+} from 'chart.js';
+
+ChartJS.register(LineElement, CategoryScale, LinearScale, PointElement, Tooltip, Legend);
 
 const App = () => {
   const [voltageData, setVoltageData] = useState([]);
@@ -14,90 +62,120 @@ const App = () => {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      const v = Math.abs(Math.sin(Date.now() / 1000) + 0.4 * Math.random());
-      setVoltageData(prev => {
-        const newData = [...prev, v];
+      const timestamp = Date.now();
+      const voltage = Math.abs(Math.sin(timestamp / 1000) + 0.4 * Math.random());
+
+      setVoltageData((prev) => {
+        const newData = [...prev, voltage];
         return newData.length > 50 ? newData.slice(-50) : newData;
       });
-      if (v > 0.9) setStepCount(c => c + 1);
+
+      if (voltage > 0.9) setStepCount((prev) => prev + 1);
     }, 200);
+
     return () => clearInterval(interval);
   }, []);
 
   const applyFFT = async () => {
     try {
-      const res = await fetch('/api/fft', {
+      const response = await fetch('/api/fft', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data: voltageData })
+        body: JSON.stringify({ data: voltageData }),
       });
-      const data = await res.json();
-      setFrequencyData(data);
+      if (!response.ok) throw new Error('FFT API error');
+      const result = await response.json();
+      setFrequencyData(result);
     } catch (error) {
-      console.error(error);
+      console.error('FFT error:', error);
+      alert('FFT processing failed.');
     }
   };
 
   const filterSignal = async () => {
     try {
-      const res = await fetch('/api/filter', {
+      const response = await fetch('/api/filter', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data: voltageData })
+        body: JSON.stringify({ data: voltageData }),
       });
-      const data = await res.json();
-      setFilteredData(data);
+      if (!response.ok) throw new Error('Filter API error');
+      const result = await response.json();
+      setFilteredData(result);
     } catch (error) {
-      console.error(error);
+      console.error('Filter error:', error);
+      alert('Signal filtering failed.');
     }
   };
 
-  const voltageChart = {
-    labels: voltageData.map((_, i) => i),
-    datasets: [{ label: 'Voltage', data: voltageData, borderColor: 'blue' }]
+  const chartOptions = {
+    responsive: true,
+    plugins: {
+      legend: { display: true },
+      tooltip: { mode: 'index', intersect: false },
+    },
+    elements: {
+      point: { radius: 0 },
+    },
+    scales: {
+      x: { display: true },
+      y: { display: true },
+    },
   };
 
-  const filteredChart = {
-    labels: filteredData.map((_, i) => i),
-    datasets: [{ label: 'Filtered Voltage', data: filteredData, borderColor: 'orange' }]
-  };
-
-  const frequencyChart = {
-    labels: frequencyData.map((_, i) => i),
-    datasets: [{ label: 'Frequency Spectrum', data: frequencyData, borderColor: 'green' }]
-  };
+  const generateChartData = (label, data, color) => ({
+    labels: data.map((_, i) => i),
+    datasets: [{ label, data, borderColor: color, borderWidth: 2 }],
+  });
 
   return (
-    <main className="p-6 grid gap-6">
-      <Card>
-        <CardContent>
-          <h2 className="text-xl font-bold">Step Count: {stepCount}</h2>
-          <Line data={voltageChart} />
-          <Button onClick={applyFFT} className="mt-2">Run FFT</Button>
-          <Line data={frequencyChart} />
-          <Button onClick={filterSignal} className="mt-2">Filter Signal</Button>
-          <Line data={filteredChart} />
-        </CardContent>
-      </Card>
+    <main className="card">
+      <h2>Step Count: {stepCount}</h2>
+
+      <Line data={generateChartData('Voltage', voltageData, 'blue')} options={chartOptions} />
+      <button onClick={applyFFT}>Run FFT</button>
+
+      <Line
+        data={generateChartData('Frequency Spectrum', frequencyData, 'green')}
+        options={chartOptions}
+      />
+      <button onClick={filterSignal}>Filter Signal</button>
+
+      <Line data={generateChartData('Filtered Voltage', filteredData, 'orange')} options={chartOptions} />
     </main>
   );
 };
 
 export default App;
 
-// ================================
-// File: server/fft.js
-// ================================
+const express = require('express');
+const bodyParser = require('body-parser');
+const apiRouter = require('./api');
+
+const app = express();
+const PORT = 3001;
+
+app.use(bodyParser.json());
+app.use('/api', apiRouter);
+
+app.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
+});
+
+
 const express = require('express');
 const fft = require('fft-js').fft;
 const fftUtil = require('fft-js').util;
+const butterworth = require('butterworth-filter');
 
 const router = express.Router();
 
 router.post('/fft', (req, res) => {
   try {
     const { data } = req.body;
-    if (!Array.isArray(data)) return res.status(400).json({ error: 'Invalid data format' });
+    if (!Array.isArray(data) || data.length === 0) {
+      return res.status(400).json({ error: 'Invalid data format' });
+    }
     const phasors = fft(data);
     const mags = fftUtil.fftMag(phasors);
     res.json(mags.slice(0, Math.floor(mags.length / 2)));
@@ -106,20 +184,12 @@ router.post('/fft', (req, res) => {
   }
 });
 
-module.exports = router;
-
-// ================================
-// File: server/filter.js
-// ================================
-const express = require('express');
-const butterworth = require('butterworth-filter');
-
-const router = express.Router();
-
 router.post('/filter', (req, res) => {
   try {
     const { data } = req.body;
-    if (!Array.isArray(data)) return res.status(400).json({ error: 'Invalid data format' });
+    if (!Array.isArray(data) || data.length === 0) {
+      return res.status(400).json({ error: 'Invalid data format' });
+    }
     const filtered = butterworth.lowpass(data, 2, 0.1);
     res.json(filtered);
   } catch (error) {
@@ -129,52 +199,51 @@ router.post('/filter', (req, res) => {
 
 module.exports = router;
 
-// ================================
-// File: notebooks/fourier_analysis.ipynb
-// ================================
-/* Markdown Cell:
-## Fourier Analysis and Signal Filtering
-*/
+CREATE TABLE IF NOT EXISTS steps (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  count INTEGER NOT NULL,
+  timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+);
 
-# Code Cell
-import numpy as np
-import matplotlib.pyplot as plt
-from scipy.fft import fft, fftfreq
-from scipy.signal import butter, filtfilt
+INSERT INTO steps (count) VALUES (0);
 
-Fs = 50
-T = 1 / Fs
-x = np.linspace(0.0, 1.0, Fs, endpoint=False)
-y = np.sin(2.0*np.pi*5.0*x) + 0.5 * np.random.randn(Fs)
+const request = require('supertest');
+const express = require('express');
+const bodyParser = require('body-parser');
+const apiRouter = require('./api');
 
-b, a = butter(2, 0.1)
-y_filtered = filtfilt(b, a, y)
+const app = express();
+app.use(bodyParser.json());
+app.use('/api', apiRouter);
 
-yf = fft(y)
-x_freq = fftfreq(Fs, T)[:Fs//2]
+describe('API Tests', () => {
+  test('POST /api/fft returns frequency magnitudes', async () => {
+    const res = await request(app)
+      .post('/api/fft')
+      .send({ data: [1, 0, -1, 0, 1, 0, -1, 0] });
+    expect(res.statusCode).toBe(200);
+    expect(Array.isArray(res.body)).toBe(true);
+    expect(res.body.length).toBeGreaterThan(0);
+    res.body.forEach((x) => expect(typeof x).toBe('number'));
+  });
 
-plt.figure()
-plt.subplot(2,1,1)
-plt.plot(x, y, label="Raw")
-plt.plot(x, y_filtered, label="Filtered")
-plt.legend()
+  test('POST /api/fft returns 400 for invalid data', async () => {
+    const res = await request(app).post('/api/fft').send({ data: 'invalid' });
+    expect(res.statusCode).toBe(400);
+  });
 
-plt.subplot(2,1,2)
-plt.plot(x_freq, 2.0/Fs * np.abs(yf[:Fs//2]))
-plt.title("FFT Spectrum")
-plt.show()
+  test('POST /api/filter returns filtered data', async () => {
+    const data = Array.from({ length: 50 }, (_, i) => Math.sin(i / 5));
+    const res = await request(app).post('/api/filter').send({ data });
+    expect(res.statusCode).toBe(200);
+    expect(Array.isArray(res.body)).toBe(true);
+    expect(res.body.length).toBe(data.length);
+  });
 
-// ================================
-// File: notebooks/laplace_transform.ipynb
-// ================================
-# Code Cell
-from sympy import symbols, Heaviside, LaplaceTransform
+  test('POST /api/filter returns 400 for invalid data', async () => {
+    const res = await request(app).post('/api/filter').send({ data: null });
+    expect(res.statusCode).toBe(400);
+  });
+});
 
-t, s = symbols('t s')
-H = Heaviside(t)
-lt = LaplaceTransform(H, t, s, noconds=True)
-lt
 
-# Markdown Cell:
-## Laplace Transform of Unit Step Function
-Used for modeling control system response in actuator simulations.
